@@ -11,6 +11,7 @@ const cors = require('cors');
 
 
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
+const { createRemoteJWKSet, jwtVerify } = require('jose-cjs');
 const uri = process.env.MONGODB_URI 
 console.log(uri, 'uri')
 
@@ -21,6 +22,34 @@ app.get( '/', (req, res) => {
   res.send('WanderLast server is running')
  
 })
+const JWKS = createRemoteJWKSet(
+  new URL('http://localhost:3000/api/auth/jwks') // এখানে ডেপ্লয় লিঙ্ক দিতে হবে
+)
+const verifyToken = async (req, res, next) => {
+  // হেডার নিয়ে আসা
+      const authHeader = req.headers.authorization;
+      // যদি হেডার না পায় তাহলে এরর দেবে
+     if(!authHeader){
+      res.status(401).json({message: 'unauthorized'})
+     }  
+    //  হেডারের ভেতরে টোকেনটা নিয়ে আসা এবং Bearer থেকে আলাদা করা। যদি না থাকে তাহলে এরর দেয়া। যদি টোকেন থাকে তাহলে পরের অপারেশনে যেতে দেয়া।
+     const token = authHeader.split(' ')[1]
+   if(!token){
+      res.status(401).json({message: 'unauthorized'})
+     } 
+     next()
+    //  ভেরিফিকেশন করা। যদি না থাকে তাহলে এরর দেয়া।
+     try{
+      const {payload} = await jwtVerify(token, JWKS);
+      console.log(payload, 'payload') // এটা দেখা গেলে ভেরিফিকেশন সম্পন্ন হবে
+      next()
+     } catch(error){
+      res.status(403).json({message: 'forbidden'})
+     }
+     
+
+     
+     }
 
 const client = new MongoClient(uri, {
   serverApi: {
@@ -29,6 +58,9 @@ const client = new MongoClient(uri, {
     deprecationErrors: true,
   }
 });
+
+
+
 
 async function run() {
   try {
@@ -39,8 +71,9 @@ async function run() {
 
     const db = client.db('wandarlast-db')
     const destinationCollection = db.collection('destinations');
-    
+    const bookingCollection = db.collection('bookings')
 
+    // ডেস্টিনেশন ডাটা যোগ করা
     app.post('/destination', async (req, res) => {
       const destinationData = req.body;
       const result = await destinationCollection.insertOne(destinationData)
@@ -49,19 +82,21 @@ async function run() {
 
     })
 
+    // ডেস্টিনেশন ডাটা ইউআইতে দেখানো
     app.get('/destination', async (req, res) => {
      const cursor = destinationCollection.find() 
       const result = await cursor.toArray()
       res.send(result) 
     })
 
-     app.get('/destination/:id', async (req, res) => {
+    // ডেস্টিনেশন ডিটেইলস দেখা
+     app.get('/destination/:id', verifyToken,  async (req, res) => {
      const {id} = req.params;
       const result = await destinationCollection.findOne({_id: new ObjectId(id)})
       res.send(result) 
     })
 
-
+    // ডেস্টিনেশন ডাটা এডিট করা
     app.patch('/destination/:id', async (req, res) => {
       const id = req.params.id;
       console.log(id, 'id')
@@ -85,10 +120,35 @@ async function run() {
       res.send(result)
     })
 
+    // ডেস্টিনেশন ডাটা ডিলিট করা
        app.delete('/destination/:id', async (req, res) => {
       const id = req.params.id;
       const query = {_id: new ObjectId(id) }
       const result = await destinationCollection.deleteOne(query)
+      res.json(result)
+    })
+
+    // বুকিং ডাটা যোগ করা
+      app.post('/booking', async (req, res) => {
+      const bookingData = req.body;
+      const result = await bookingCollection.insertOne(bookingData)
+      console.log(result, 'data on server')
+      res.json(result)
+
+    })
+
+     // বুকিং ডাটা দেখা দেখা, আইডি দিয়ে ফিল্টার্ড
+     app.get('/booking/:userId', async (req, res) => {
+     const {userId} = req.params;
+      const result = await bookingCollection.find({userId : userId}).toArray()
+      res.json(result) 
+    })
+
+      // বুকিং ডাটা ডিলিট করা
+       app.delete('/booking/:userId', async (req, res) => {
+      const {userId} = req.params;
+      const query = {_id: new ObjectId(userId) }
+      const result = await bookingCollection.deleteOne(query)
       res.json(result)
     })
 
